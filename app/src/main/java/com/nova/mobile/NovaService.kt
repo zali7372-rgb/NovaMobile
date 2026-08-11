@@ -11,6 +11,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
 import java.net.URLEncoder
 import java.util.Locale
@@ -23,6 +24,8 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
     private var isListening = false
     private var isSpeaking = false
     private var ttsReady = false
+
+    private var pendingSpeech: String? = null
 
     private val handler by lazy {
         Handler(mainLooper)
@@ -43,9 +46,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             1001
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // SERVICE
-    // ---------------------------------------------------------
+    // =========================================================
 
     override fun onCreate() {
         super.onCreate()
@@ -88,11 +91,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             """.trimIndent()
         )
 
-        textToSpeech =
-            TextToSpeech(
-                this,
-                this
-            )
+        setupTextToSpeech()
 
         setupRecognizer()
 
@@ -100,74 +99,144 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             {
                 startListening()
             },
-            500
+            1000
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // TEXT TO SPEECH
-    // ---------------------------------------------------------
+    // =========================================================
+
+    private fun setupTextToSpeech() {
+
+        textToSpeech =
+            TextToSpeech(
+                this,
+                this
+            )
+
+        textToSpeech?.setOnUtteranceProgressListener(
+            object : UtteranceProgressListener() {
+
+                override fun onStart(
+                    utteranceId: String?
+                ) {
+
+                    isSpeaking = true
+
+                    sendDebug(
+                        """
+                        🗣️ NOVA BESZÉL
+                        TTS: BESZÉD ELINDULT
+                        """.trimIndent()
+                    )
+                }
+
+                override fun onDone(
+                    utteranceId: String?
+                ) {
+
+                    handler.post {
+                        isSpeaking = false
+
+                        sendDebug(
+                            """
+                            🗣️ NOVA BESZÉL
+                            TTS: BESZÉD BEFEJEZVE
+                            🎤 Mikrofon: újraindítás...
+                            """.trimIndent()
+                        )
+
+                        startListening()
+                    }
+                }
+
+                override fun onError(
+                    utteranceId: String?
+                ) {
+
+                    handler.post {
+                        isSpeaking = false
+
+                        sendDebug(
+                            """
+                            🔴 TTS HIBA
+                            ❌ A beszéd leállt
+                            """.trimIndent()
+                        )
+
+                        startListening()
+                    }
+                }
+            }
+        )
+    }
 
     override fun onInit(
         status: Int
     ) {
 
         if (
-            status ==
+            status !=
             TextToSpeech.SUCCESS
         ) {
-
-            val result =
-                textToSpeech?.setLanguage(
-                    Locale("hu", "HU")
-                )
-
-            textToSpeech?.setSpeechRate(
-                1.0f
-            )
-
-            textToSpeech?.setPitch(
-                1.0f
-            )
-
-            ttsReady =
-                result !=
-                    TextToSpeech.LANG_MISSING_DATA &&
-                result !=
-                    TextToSpeech.LANG_NOT_SUPPORTED
-
-            if (ttsReady) {
-
-                sendDebug(
-                    """
-                    🟢 TTS
-                    🗣️ Állapot: KÉSZ
-                    🇭🇺 Nyelv: magyar
-                    """.trimIndent()
-                )
-
-            } else {
-
-                sendDebug(
-                    """
-                    🔴 TTS
-                    🗣️ Állapot: HIBA
-                    ❌ Magyar TTS nem érhető el
-                    """.trimIndent()
-                )
-            }
-
-        } else {
 
             ttsReady = false
 
             sendDebug(
                 """
                 🔴 TTS
-                🗣️ Állapot: NEM INDULT
+                🗣️ Állapot: HIBA
                 ❌ Text To Speech inicializálási hiba
                 """.trimIndent()
             )
+
+            return
+        }
+
+        val result =
+            textToSpeech?.setLanguage(
+                Locale("hu", "HU")
+            )
+
+        textToSpeech?.setSpeechRate(
+            1.0f
+        )
+
+        textToSpeech?.setPitch(
+            1.0f
+        )
+
+        ttsReady =
+            result !=
+                TextToSpeech.LANG_MISSING_DATA &&
+            result !=
+                TextToSpeech.LANG_NOT_SUPPORTED
+
+        if (!ttsReady) {
+
+            sendDebug(
+                """
+                🔴 TTS
+                🗣️ Állapot: HIBA
+                ❌ Magyar TTS nem érhető el
+                """.trimIndent()
+            )
+
+            return
+        }
+
+        sendDebug(
+            """
+            🟢 TTS
+            🗣️ Állapot: KÉSZ
+            🇭🇺 Nyelv: magyar
+            """.trimIndent()
+        )
+
+        pendingSpeech?.let {
+            pendingSpeech = null
+            speak(it)
         }
     }
 
@@ -175,19 +244,27 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         text: String
     ) {
 
+        if (text.isBlank()) {
+            return
+        }
+
         sendDebug(
             """
-            🗣️ NOVA BESZÉL
+            🗣️ NOVA VÁLASZ
             "$text"
             """.trimIndent()
         )
 
         if (!ttsReady) {
 
+            pendingSpeech = text
+
             sendDebug(
                 """
-                🔴 TTS HIBA
-                ❌ A TextToSpeech még nem áll készen
+                🟡 TTS
+                ⏳ Még nem kész
+                📝 Várakozó szöveg:
+                "$text"
                 """.trimIndent()
             )
 
@@ -196,33 +273,374 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
 
         isSpeaking = true
 
-        textToSpeech?.speak(
-            text,
-            TextToSpeech.QUEUE_FLUSH,
-            null,
-            "NOVA_RESPONSE"
-        )
+        if (isListening) {
 
-        /*
-         * Biztonsági visszaállítás.
-         * Ha a TTS callback valamiért nem érkezik meg,
-         * Nova akkor is újra figyelni kezd.
-         */
-        handler.postDelayed(
-            {
-                isSpeaking = false
+            try {
+                recognizer?.cancel()
+            } catch (_: Exception) {
+            }
 
-                if (!isListening) {
-                    startListening()
-                }
-            },
-            2200
-        )
+            isListening = false
+        }
+
+        try {
+
+            textToSpeech?.speak(
+                text,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "NOVA_RESPONSE"
+            )
+
+        } catch (e: Exception) {
+
+            isSpeaking = false
+
+            sendDebug(
+                """
+                🔴 TTS HIBA
+                ❌ ${e.message}
+                """.trimIndent()
+            )
+
+            restartListening(1000)
+        }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
+    // NOVA MEGSZÓLÍTÁSOK
+    // =========================================================
+
+    private val novaNames =
+        listOf(
+
+            "nova",
+            "noa",
+            "novaa",
+            "novah",
+            "novi",
+            "novi ai",
+            "nova ai",
+            "novus",
+            "novácska",
+            "novacska",
+
+            "hey nova",
+            "hey noa",
+            "he nova",
+            "he noa",
+
+            "szia nova",
+            "szia noa",
+
+            "hallod nova",
+            "hallod noa",
+
+            "figyelj nova",
+            "figyelj noa",
+
+            "nova figyelj",
+            "noa figyelj",
+
+            "nova légyszi",
+            "nova legyszi",
+            "nova légy szíves",
+            "nova legy szives",
+
+            "noa légyszi",
+            "noa legyszi",
+            "noa légy szíves",
+            "noa legy szives",
+
+            "hé nova",
+            "he nova",
+
+            "na nova",
+            "na noa",
+
+            "nova kérlek",
+            "nova kerlek",
+            "noa kérlek",
+            "noa kerlek",
+
+            "nova hallgass",
+            "noa hallgass",
+
+            "nova segíts",
+            "nova segits",
+            "noa segíts",
+            "noa segits",
+
+            "nova segíts nekem",
+            "nova segits nekem",
+
+            "nova csináld",
+            "nova csinald",
+            "noa csináld",
+            "noa csinald",
+
+            "nova csináld meg",
+            "nova csinald meg",
+
+            "nova indulj",
+            "noa indulj",
+
+            "nova ébresztő",
+            "nova ebreszto",
+
+            "nova figyelj rám",
+            "nova figyelj ram",
+
+            "noa figyelj rám",
+            "noa figyelj ram"
+        )
+
+    // =========================================================
+    // APP ALIASOK
+    // =========================================================
+
+    private val appAliases =
+        mapOf(
+
+            "youtube" to listOf(
+                "youtube",
+                "youtubeot",
+                "you tube",
+                "you tube ot",
+                "jutub",
+                "jútub",
+                "youtub",
+                "youtubu",
+                "jutube",
+                "jutubot",
+                "youtubot",
+                "youtube app"
+            ),
+
+            "discord" to listOf(
+                "discord",
+                "discordot",
+                "diszkord",
+                "discort",
+                "disscord",
+                "diszkordot",
+                "discord app"
+            ),
+
+            "tiktok" to listOf(
+                "tiktok",
+                "tiktokot",
+                "tik tok",
+                "tik tokot",
+                "tiktók",
+                "tiktak",
+                "tiktok app"
+            ),
+
+            "chrome" to listOf(
+                "chrome",
+                "chromeot",
+                "króm",
+                "krom",
+                "kromot",
+                "chrome app"
+            ),
+
+            "spotify" to listOf(
+                "spotify",
+                "spotifyt",
+                "spoty",
+                "szpotifáj",
+                "szpotify",
+                "spotify app"
+            ),
+
+            "facebook" to listOf(
+                "facebook",
+                "facebookot",
+                "fészbuk",
+                "feszbuk",
+                "facebook app"
+            ),
+
+            "messenger" to listOf(
+                "messenger",
+                "messengert",
+                "mesenger",
+                "messzi",
+                "messenger app"
+            ),
+
+            "instagram" to listOf(
+                "instagram",
+                "instagramot",
+                "insta",
+                "instát",
+                "instat",
+                "instagra",
+                "instagram app"
+            ),
+
+            "google maps" to listOf(
+                "google maps",
+                "google map",
+                "google mapsot",
+                "maps",
+                "mapsot",
+                "térkép",
+                "terkep",
+                "google térkép",
+                "google terkep"
+            ),
+
+            "gmail" to listOf(
+                "gmail",
+                "gmailt",
+                "g mail",
+                "g mailt",
+                "gmail app"
+            ),
+
+            "roblox" to listOf(
+                "roblox",
+                "robloxot",
+                "robloks",
+                "roblox app"
+            ),
+
+            "minecraft" to listOf(
+                "minecraft",
+                "minecraftot",
+                "mine craft",
+                "mine craftot",
+                "minecraft app"
+            ),
+
+            "whatsapp" to listOf(
+                "whatsapp",
+                "whatsappot",
+                "whats app",
+                "vácáp",
+                "vacap",
+                "whatsapp app"
+            ),
+
+            "telegram" to listOf(
+                "telegram",
+                "telegramot",
+                "telegrám",
+                "telegram app"
+            ),
+
+            "reddit" to listOf(
+                "reddit",
+                "redditet",
+                "redit",
+                "reddit app"
+            ),
+
+            "netflix" to listOf(
+                "netflix",
+                "netflixet",
+                "netfliksz",
+                "netflix app"
+            ),
+
+            "galéria" to listOf(
+                "galéria",
+                "galeria",
+                "galériát",
+                "galeriat",
+                "képek",
+                "kepek",
+                "fotók",
+                "fotok",
+                "galéria app",
+                "galeria app"
+            ),
+
+            "kamera" to listOf(
+                "kamera",
+                "kamerát",
+                "kamerat",
+                "kamerát nyisd meg",
+                "kamera app"
+            ),
+
+            "beállítások" to listOf(
+                "beállítások",
+                "beallitasok",
+                "beállítás",
+                "beallitas",
+                "beállításokat",
+                "beallitasokat",
+                "beállítások app"
+            ),
+
+            "Play Áruház" to listOf(
+                "play áruház",
+                "play aruhaz",
+                "play áruházat",
+                "play aruhazat",
+                "play store",
+                "playstore",
+                "google play",
+                "google playt"
+            ),
+
+            "Google" to listOf(
+                "google",
+                "google-t",
+                "googlet",
+                "gugli"
+            ),
+
+            "Telefon" to listOf(
+                "telefon",
+                "telefont",
+                "telefon app",
+                "hívások",
+                "hivasok"
+            ),
+
+            "Üzenetek" to listOf(
+                "üzenetek",
+                "uzenetek",
+                "üzeneteket",
+                "uzeneteket",
+                "sms",
+                "sms-ek"
+            ),
+
+            "Óra" to listOf(
+                "óra",
+                "ora",
+                "órát",
+                "orat",
+                "óra app",
+                "ora app"
+            ),
+
+            "Naptár" to listOf(
+                "naptár",
+                "naptar",
+                "naptárat",
+                "naptarat",
+                "calendar"
+            ),
+
+            "Fájlok" to listOf(
+                "fájlok",
+                "fajlok",
+                "fájlkezelő",
+                "fajlkezelo",
+                "file manager"
+            )
+        )
+
+    // =========================================================
     // SPEECH RECOGNIZER
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun setupRecognizer() {
 
@@ -283,13 +701,11 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 override fun onRmsChanged(
                     rmsdB: Float
                 ) {
-                    // Hangerő változás.
                 }
 
                 override fun onBufferReceived(
                     buffer: ByteArray?
                 ) {
-                    // Nem szükséges.
                 }
 
                 override fun onEndOfSpeech() {
@@ -300,7 +716,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                         """
                         🟡 MIKROFON
                         🎤 Állapot: FELVÉTEL VÉGE
-                        👂 Hallotta: feldolgozás...
+                        👂 Feldolgozás...
                         """.trimIndent()
                     )
                 }
@@ -346,9 +762,6 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     val text =
                         matches
                             ?.firstOrNull()
-                            ?.lowercase(
-                                Locale("hu", "HU")
-                            )
                             ?.trim()
                             ?: ""
 
@@ -380,9 +793,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // LISTENING
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun startListening() {
 
@@ -391,6 +804,18 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         }
 
         if (isListening) {
+            return
+        }
+
+        if (!ttsReady) {
+
+            sendDebug(
+                """
+                🟡 HALLGATÁS
+                ⏳ TTS még inicializálódik
+                """.trimIndent()
+            )
+
             return
         }
 
@@ -439,9 +864,17 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                         .EXTRA_MAX_RESULTS,
                     10
                 )
+
+                putExtra(
+                    RecognizerIntent
+                        .EXTRA_CALLING_PACKAGE,
+                    packageName
+                )
             }
 
         try {
+
+            isListening = true
 
             recognizer?.startListening(
                 intent
@@ -455,9 +888,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 """.trimIndent()
             )
 
-        } catch (
-            e: Exception
-        ) {
+        } catch (e: Exception) {
 
             isListening = false
 
@@ -481,7 +912,10 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         handler.postDelayed(
             {
 
-                if (!isSpeaking) {
+                if (
+                    !isSpeaking &&
+                    !isListening
+                ) {
                     startListening()
                 }
 
@@ -490,195 +924,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         )
     }
 
-    // ---------------------------------------------------------
-    // NOVA MEGSZÓLÍTÁSOK
-    // ---------------------------------------------------------
-
-    private val novaNames =
-        listOf(
-
-            "nova",
-            "noa",
-            "novaa",
-            "novah",
-            "novi",
-            "novi ai",
-            "nova ai",
-            "novus",
-            "novácska",
-            "novacska",
-
-            "hey nova",
-            "hey noa",
-            "he nova",
-            "he noa",
-
-            "szia nova",
-            "szia noa",
-
-            "hallod nova",
-            "hallod noa",
-
-            "figyelj nova",
-            "figyelj noa",
-
-            "nova figyelj",
-            "noa figyelj",
-
-            "nova légyszi",
-            "nova legyszi",
-            "nova légy szíves",
-            "nova legy szives",
-
-            "noa légyszi",
-            "noa legyszi",
-            "noa légy szíves",
-            "noa legy szives",
-
-            "hé nova",
-            "he nova",
-
-            "na nova",
-            "na noa"
-        )
-
-    // ---------------------------------------------------------
-    // APP ALIASOK
-    // ---------------------------------------------------------
-
-    private val appAliases =
-        mapOf(
-
-            "youtube" to listOf(
-                "youtube",
-                "you tube",
-                "jutub",
-                "jútub",
-                "youtub",
-                "youtubu",
-                "jutube"
-            ),
-
-            "discord" to listOf(
-                "discord",
-                "diszkord",
-                "discort",
-                "disscord"
-            ),
-
-            "tiktok" to listOf(
-                "tiktok",
-                "tik tok",
-                "tiktók",
-                "tiktak"
-            ),
-
-            "chrome" to listOf(
-                "chrome",
-                "króm",
-                "krom"
-            ),
-
-            "spotify" to listOf(
-                "spotify",
-                "spoty",
-                "szpotifáj",
-                "szpotify"
-            ),
-
-            "facebook" to listOf(
-                "facebook",
-                "facebookot",
-                "fészbuk",
-                "feszbuk"
-            ),
-
-            "messenger" to listOf(
-                "messenger",
-                "messengert",
-                "mesenger",
-                "messzi"
-            ),
-
-            "instagram" to listOf(
-                "instagram",
-                "insta",
-                "instát",
-                "instat"
-            ),
-
-            "google maps" to listOf(
-                "google maps",
-                "google map",
-                "maps",
-                "térkép",
-                "google térkép"
-            ),
-
-            "gmail" to listOf(
-                "gmail",
-                "g mail",
-                "gmailt"
-            ),
-
-            "roblox" to listOf(
-                "roblox",
-                "robloxot",
-                "robloks"
-            ),
-
-            "minecraft" to listOf(
-                "minecraft",
-                "minecraftot",
-                "mine craft"
-            ),
-
-            "whatsapp" to listOf(
-                "whatsapp",
-                "whats app",
-                "vácáp"
-            ),
-
-            "telegram" to listOf(
-                "telegram",
-                "telegrám"
-            ),
-
-            "reddit" to listOf(
-                "reddit",
-                "redditet"
-            ),
-
-            "netflix" to listOf(
-                "netflix",
-                "netfliksz"
-            ),
-
-            "galéria" to listOf(
-                "galéria",
-                "galeria",
-                "képek",
-                "fotók",
-                "fotok"
-            ),
-
-            "kamera" to listOf(
-                "kamera",
-                "kamerát",
-                "kamerat"
-            ),
-
-            "beállítások" to listOf(
-                "beállítások",
-                "beallitasok",
-                "beállítás",
-                "beallitas"
-            )
-        )
-
-    // ---------------------------------------------------------
+    // =========================================================
     // COMMAND HANDLER
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun handleCommand(
         text: String
@@ -694,7 +942,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 """.trimIndent()
             )
 
-            restartListening(500)
+            restartListening(
+                500
+            )
 
             return
         }
@@ -724,7 +974,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 """.trimIndent()
             )
 
-            restartListening(500)
+            restartListening(
+                500
+            )
 
             return
         }
@@ -733,6 +985,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             normalized
 
         novaNames.forEach {
+
             command =
                 command.replace(
                     normalizeText(it),
@@ -758,9 +1011,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             """.trimIndent()
         )
 
-        // ---------------------------------------------
-        // CSAK "NOVA"
-        // ---------------------------------------------
+        // =====================================================
+        // CSAK NOVA
+        // =====================================================
 
         if (command.isBlank()) {
 
@@ -771,9 +1024,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // ---------------------------------------------
+        // =====================================================
         // LEÁLLÍTÁS
-        // ---------------------------------------------
+        // =====================================================
 
         if (
             containsAny(
@@ -782,6 +1035,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     "allj",
                     "állj",
                     "kapcsold ki magad",
+                    "kapcsold ki",
                     "allj le",
                     "állj le",
                     "leallhatsz",
@@ -789,7 +1043,10 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     "stop",
                     "off",
                     "állj le nova",
-                    "allj le nova"
+                    "allj le nova",
+                    "fejezd be",
+                    "állítsd le",
+                    "allitsd le"
                 )
             )
         ) {
@@ -815,9 +1072,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // ---------------------------------------------
+        // =====================================================
         // IDŐZÍTŐ
-        // ---------------------------------------------
+        // =====================================================
 
         if (
             containsAny(
@@ -827,7 +1084,11 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     "időzítő",
                     "timer",
                     "állíts be időzítőt",
-                    "allits be idozitot"
+                    "allits be idozitot",
+                    "állíts időzítőt",
+                    "allits idozitot",
+                    "időzítőt kérek",
+                    "idozitot kerek"
                 )
             )
         ) {
@@ -888,20 +1149,18 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                             startActivity(
                                 intent
                             )
-                        } catch (
-                            e: Exception
-                        ) {
+                        } catch (e: Exception) {
 
                             sendDebug(
                                 """
-                                🔴 Időzítő hiba:
-                                ${e.message}
+                                🔴 IDŐZÍTŐ HIBA
+                                ❌ ${e.message}
                                 """.trimIndent()
                             )
                         }
 
                     },
-                    1200
+                    1000
                 )
 
                 return
@@ -914,9 +1173,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // ---------------------------------------------
+        // =====================================================
         // GOOGLE KERESÉS
-        // ---------------------------------------------
+        // =====================================================
 
         if (
             containsAny(
@@ -928,7 +1187,11 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     "keresd meg",
                     "googlezd meg",
                     "googlezz rá",
-                    "googlezz ra"
+                    "googlezz ra",
+                    "keress nekem",
+                    "nézz utána",
+                    "nezz utana",
+                    "keress rá arra"
                 )
             )
         ) {
@@ -943,17 +1206,27 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 "keresd meg",
                 "googlezd meg",
                 "googlezz rá",
-                "googlezz ra"
+                "googlezz ra",
+                "keress nekem",
+                "nézz utána",
+                "nezz utana",
+                "keress rá arra"
             ).forEach {
+
                 query =
                     query.replace(
-                        it,
+                        normalizeText(it),
                         ""
                     )
             }
 
             query =
-                query.trim()
+                query
+                    .replace(
+                        Regex("\\s+"),
+                        " "
+                    )
+                    .trim()
 
             if (
                 query.isNotBlank()
@@ -997,14 +1270,12 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                             startActivity(
                                 intent
                             )
-                        } catch (
-                            e: Exception
-                        ) {
+                        } catch (e: Exception) {
 
                             sendDebug(
                                 """
-                                🔴 Google hiba:
-                                ${e.message}
+                                🔴 GOOGLE HIBA
+                                ❌ ${e.message}
                                 """.trimIndent()
                             )
                         }
@@ -1023,9 +1294,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // ---------------------------------------------
+        // =====================================================
         // APP MEGNYITÁS
-        // ---------------------------------------------
+        // =====================================================
 
         if (
             containsAny(
@@ -1040,7 +1311,15 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     "indítsd",
                     "nyisd fel",
                     "menj a",
-                    "menj be"
+                    "menj be",
+                    "nyisd meg nekem",
+                    "nyisd ki nekem",
+                    "indítsd el nekem",
+                    "inditsd el nekem",
+                    "nyisd meg légyszi",
+                    "nyisd meg legyszi",
+                    "indítsd el légyszi",
+                    "inditsd el legyszi"
                 )
             )
         ) {
@@ -1049,20 +1328,29 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 command
 
             listOf(
+                "nyisd meg nekem",
                 "nyisd meg",
+                "nyisd ki nekem",
                 "nyisd ki",
-                "nyisd",
-                "inditsd el",
-                "indítsd el",
-                "inditsd",
-                "indítsd",
                 "nyisd fel",
+                "nyisd",
+                "indítsd el nekem",
+                "inditsd el nekem",
+                "indítsd el",
+                "inditsd el",
+                "indítsd",
+                "inditsd",
                 "menj a",
-                "menj be"
+                "menj be",
+                "légyszi",
+                "legyszi",
+                "légy szíves",
+                "legy szives"
             ).forEach {
+
                 appName =
                     appName.replace(
-                        it,
+                        normalizeText(it),
                         ""
                     )
             }
@@ -1070,8 +1358,8 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             appName =
                 appName
                     .replace(
-                        "ot",
-                        ""
+                        Regex("\\s+"),
+                        " "
                     )
                     .trim()
 
@@ -1103,6 +1391,14 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 appName.isNotBlank()
             ) {
 
+                sendDebug(
+                    """
+                    ⚙️ MŰVELET
+                    App keresése:
+                    "$appName"
+                    """.trimIndent()
+                )
+
                 openApplication(
                     appName
                 )
@@ -1117,9 +1413,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // ---------------------------------------------
-        // APP KERESÉSE PARANCS NÉLKÜL
-        // ---------------------------------------------
+        // =====================================================
+        // KÖZVETLEN APP NÉV
+        // =====================================================
 
         val directApp =
             resolveAppAlias(
@@ -1145,17 +1441,85 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        // ---------------------------------------------
+        // =====================================================
+        // EGYSZERŰ VÁLASZOK
+        // =====================================================
+
+        if (
+            containsAny(
+                command,
+                listOf(
+                    "hogy vagy",
+                    "hogy vagy nova",
+                    "mi újság",
+                    "miujsag",
+                    "mi a helyzet",
+                    "mizu",
+                    "mizujs"
+                )
+            )
+        ) {
+
+            speak(
+                "Köszi, jól vagyok. Futok és figyelek."
+            )
+
+            return
+        }
+
+        if (
+            containsAny(
+                command,
+                listOf(
+                    "köszönöm",
+                    "koszonom",
+                    "köszi",
+                    "koszi",
+                    "köszi nova",
+                    "koszi nova"
+                )
+            )
+        ) {
+
+            speak(
+                "Szívesen."
+            )
+
+            return
+        }
+
+        if (
+            containsAny(
+                command,
+                listOf(
+                    "mit tudsz",
+                    "mire vagy képes",
+                    "mire vagy kepes",
+                    "mit tudsz nova"
+                )
+            )
+        ) {
+
+            speak(
+                "Tudok alkalmazásokat megnyitni, keresni a Google-ben, időzítőt beállítani, és egyszerű parancsokat végrehajtani."
+            )
+
+            return
+        }
+
+        // =====================================================
         // ISMERETLEN
-        // ---------------------------------------------
+        // =====================================================
 
         sendDebug(
             """
             🟡 NOVA
             👂 Hallotta:
             "$text"
+
             🧠 Parancs:
             "$command"
+
             ⚙️ Művelet:
             Ismeretlen parancs
             """.trimIndent()
@@ -1166,9 +1530,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // APP ALIAS FELISMERÉS
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun resolveAppAlias(
         input: String
@@ -1178,6 +1542,10 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             normalizeText(
                 input
             )
+
+        if (normalized.isBlank()) {
+            return null
+        }
 
         for (
             entry in appAliases
@@ -1208,6 +1576,13 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     )
 
                 if (
+                    normalized ==
+                    cleanAlias
+                ) {
+                    return officialName
+                }
+
+                if (
                     normalized.contains(
                         cleanAlias
                     )
@@ -1220,9 +1595,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         return null
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // APP MEGNYITÁSA
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun openApplication(
         name: String
@@ -1230,7 +1605,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
 
         val apps =
             packageManager
-                .getInstalledApplications(0)
+                .getInstalledApplications(
+                    0
+                )
 
         val searchName =
             normalizeText(
@@ -1287,15 +1664,21 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                             "Oké, megnyitottam a $label alkalmazást."
                         )
 
-                    } catch (
-                        e: Exception
-                    ) {
+                        sendDebug(
+                            """
+                            🟢 APP
+                            ✅ Megnyitva:
+                            $label
+                            """.trimIndent()
+                        )
+
+                    } catch (e: Exception) {
 
                         sendDebug(
                             """
                             🔴 APP HIBA
                             $label
-                            ${e.message}
+                            ❌ ${e.message}
                             """.trimIndent()
                         )
 
@@ -1322,9 +1705,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // SEGÉDFÜGGVÉNYEK
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun containsAny(
         text: String,
@@ -1332,6 +1715,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
     ): Boolean {
 
         return values.any {
+
             text.contains(
                 normalizeText(it)
             )
@@ -1393,9 +1777,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             .trim()
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // DEBUG
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun sendDebug(
         text: String
@@ -1421,9 +1805,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // SPEECH ERROR
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun getSpeechErrorText(
         error: Int
@@ -1474,9 +1858,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // NOTIFICATION
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun createNotificationChannel() {
 
@@ -1498,24 +1882,33 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // DESTROY
-    // ---------------------------------------------------------
+    // =========================================================
 
     override fun onDestroy() {
 
         isListening = false
         isSpeaking = false
+        ttsReady = false
 
         handler.removeCallbacksAndMessages(
             null
         )
 
-        recognizer?.cancel()
+        try {
+            recognizer?.cancel()
+        } catch (_: Exception) {
+        }
+
         recognizer?.destroy()
         recognizer = null
 
-        textToSpeech?.stop()
+        try {
+            textToSpeech?.stop()
+        } catch (_: Exception) {
+        }
+
         textToSpeech?.shutdown()
         textToSpeech = null
 
