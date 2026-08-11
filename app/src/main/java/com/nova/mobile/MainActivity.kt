@@ -11,14 +11,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,7 +76,8 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        speechRecognizer =
+            SpeechRecognizer.createSpeechRecognizer(this)
 
         speechRecognizer?.setRecognitionListener(
             object : RecognitionListener {
@@ -100,11 +99,8 @@ class MainActivity : ComponentActivity() {
                 override fun onError(error: Int) {
                     listening = false
 
-                    if (novaActive) {
-                        startListening()
-                    } else {
-                        startListening()
-                    }
+                    // Restart listening automatically.
+                    startListening()
                 }
 
                 override fun onResults(results: Bundle?) {
@@ -117,7 +113,8 @@ class MainActivity : ComponentActivity() {
                         )
 
                     val text =
-                        matches?.firstOrNull()
+                        matches
+                            ?.firstOrNull()
                             ?.lowercase(Locale.getDefault())
                             ?: ""
 
@@ -142,30 +139,31 @@ class MainActivity : ComponentActivity() {
 
         val recognizer = speechRecognizer ?: return
 
-        val intent = Intent(
-            RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-        ).apply {
+        val intent =
+            Intent(
+                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            ).apply {
 
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
 
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE,
-                Locale.getDefault()
-            )
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    Locale.getDefault()
+                )
 
-            putExtra(
-                RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                true
-            )
+                putExtra(
+                    RecognizerIntent.EXTRA_PARTIAL_RESULTS,
+                    true
+                )
 
-            putExtra(
-                RecognizerIntent.EXTRA_MAX_RESULTS,
-                3
-            )
-        }
+                putExtra(
+                    RecognizerIntent.EXTRA_MAX_RESULTS,
+                    5
+                )
+            }
 
         try {
             recognizer.startListening(intent)
@@ -179,64 +177,223 @@ class MainActivity : ComponentActivity() {
 
         lastCommand = text
 
-        if (
-            text.contains("nova") ||
-            text.contains("noa")
-        ) {
+        val normalized =
+            text
+                .lowercase(Locale.getDefault())
+                .replace("á", "a")
+                .replace("é", "e")
+                .replace("í", "i")
+                .replace("ó", "o")
+                .replace("ö", "o")
+                .replace("ő", "o")
+                .replace("ú", "u")
+                .replace("ü", "u")
+                .replace("ű", "u")
 
-            if (
-                text.contains("off") ||
-                text.contains("ki") ||
-                text.contains("kikapcsol")
-            ) {
+        /*
+         * NOVA ACTIVATION
+         */
+
+        val activationWords = listOf(
+            "nova",
+            "noa",
+            "nóva",
+            "hey nova",
+            "ok nova",
+            "okay nova"
+        )
+
+        val activated =
+            activationWords.any {
+                normalized.contains(it)
+            }
+
+        if (activated) {
+
+            val turningOff =
+                normalized.contains("off") ||
+                normalized.contains("ki") ||
+                normalized.contains("kikapcsol")
+
+            if (turningOff) {
                 novaActive = false
                 lastCommand = "Nova OFF"
                 return
             }
 
             novaActive = true
-            lastCommand = "Nova ACTIVE"
+
+            /*
+             * If there is an app command in the same sentence,
+             * process it immediately.
+             */
+            val command =
+                normalized
+                    .replace("nova", "")
+                    .replace("noa", "")
+                    .replace("hey", "")
+                    .replace("ok", "")
+                    .replace("okay", "")
+                    .trim()
+
+            if (command.isNotBlank()) {
+                openAppFromCommand(command)
+            } else {
+                lastCommand = "Nova ACTIVE"
+            }
+
             return
         }
 
+        /*
+         * NOVA MUST BE ACTIVE FOR APP COMMANDS
+         */
+
         if (!novaActive) return
 
-        when {
-
-            text.contains("youtube") -> {
-                openApp(
-                    "com.google.android.youtube"
-                )
-            }
-
-            text.contains("chrome") -> {
-                openApp(
-                    "com.android.chrome"
-                )
-            }
-
-            text.contains("discord") -> {
-                openApp(
-                    "com.discord"
-                )
-            }
-
-            text.contains("ki") -> {
-                novaActive = false
-                lastCommand = "Nova OFF"
-            }
-        }
+        openAppFromCommand(normalized)
     }
 
-    private fun openApp(packageName: String) {
+    private fun openAppFromCommand(command: String) {
 
-        val intent =
-            packageManager.getLaunchIntentForPackage(
-                packageName
-            )
+        var cleaned =
+            command
+                .lowercase(Locale.getDefault())
+                .trim()
 
-        if (intent != null) {
-            startActivity(intent)
+        val wordsToRemove = listOf(
+            "nyisd meg",
+            "nyisd ki",
+            "inditsd el",
+            "inditsd",
+            "nyisd",
+            "meg",
+            "el",
+            "az",
+            "a",
+            "appot",
+            "alkalmazast",
+            "alkalmazást"
+        )
+
+        for (word in wordsToRemove) {
+            cleaned =
+                cleaned.replace(word, "")
+        }
+
+        cleaned =
+            cleaned
+                .replace("spotifyt", "spotify")
+                .replace("youtubet", "youtube")
+                .replace("discordot", "discord")
+                .replace("chromot", "chrome")
+                .replace("robloxot", "roblox")
+                .replace("gmailt", "gmail")
+                .replace("tiktokot", "tiktok")
+                .replace("mapset", "maps")
+                .replace("kamerat", "kamera")
+                .replace("fotokat", "fotok")
+                .trim()
+
+        if (cleaned.isBlank()) return
+
+        val apps =
+            packageManager
+                .getInstalledApplications(
+                    PackageManager.GET_META_DATA
+                )
+
+        var bestPackage: String? = null
+        var bestScore = 0
+
+        for (app in apps) {
+
+            val label =
+                packageManager
+                    .getApplicationLabel(app)
+                    .toString()
+                    .lowercase(Locale.getDefault())
+
+            val score =
+                calculateMatchScore(
+                    cleaned,
+                    label
+                )
+
+            if (score > bestScore) {
+                bestScore = score
+                bestPackage = app.packageName
+            }
+        }
+
+        if (
+            bestPackage != null &&
+            bestScore >= 60
+        ) {
+
+            val launchIntent =
+                packageManager
+                    .getLaunchIntentForPackage(
+                        bestPackage!!
+                    )
+
+            if (launchIntent != null) {
+
+                lastCommand =
+                    "Opening: $cleaned"
+
+                try {
+                    startActivity(launchIntent)
+                    return
+                } catch (_: Exception) {
+                }
+            }
+        }
+
+        lastCommand =
+            "App not found: $cleaned"
+    }
+
+    private fun calculateMatchScore(
+        command: String,
+        appName: String
+    ): Int {
+
+        if (command == appName) {
+            return 100
+        }
+
+        if (appName.contains(command)) {
+            return 90
+        }
+
+        if (command.contains(appName)) {
+            return 85
+        }
+
+        val commandWords =
+            command
+                .split(" ")
+                .filter { it.length >= 2 }
+
+        if (commandWords.isEmpty()) {
+            return 0
+        }
+
+        var matched = 0
+
+        for (word in commandWords) {
+            if (appName.contains(word)) {
+                matched++
+            }
+        }
+
+        return if (matched > 0) {
+            (matched.toFloat() /
+                    commandWords.size *
+                    80).toInt()
+        } else {
+            0
         }
     }
 
@@ -277,25 +434,28 @@ fun NovaScreen(
     )
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+        contentAlignment =
+            Alignment.Center
     ) {
 
-        Canvas(
-            modifier = Modifier.fillMaxSize()
+        androidx.compose.foundation.Canvas(
+            modifier =
+                Modifier.fillMaxSize()
         ) {
 
             val center =
-                Offset(
+                androidx.compose.ui.geometry.Offset(
                     size.width / 2f,
                     size.height / 2f
                 )
 
             val radius =
                 70.dp.toPx() *
-                        if (active) pulse else 0.85f
+                    if (active) pulse else 0.85f
 
             drawCircle(
                 brush =
@@ -337,7 +497,7 @@ fun NovaScreen(
                 color = Color.White,
                 radius = radius * 0.13f,
                 center =
-                    Offset(
+                    androidx.compose.ui.geometry.Offset(
                         center.x - radius * 0.28f,
                         center.y - radius * 0.28f
                     )
