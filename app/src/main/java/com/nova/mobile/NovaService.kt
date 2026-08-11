@@ -1,7 +1,10 @@
 package com.nova.mobile
 
-import android.app.*
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Intent
+import android.os.Bundle
 import android.os.IBinder
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -18,13 +21,15 @@ class NovaService : Service() {
 
         createNotificationChannel()
 
-        val notification =
-            NotificationCompat.Builder(this, "nova_service")
-                .setContentTitle("Nova")
-                .setContentText("Nova is running in the background")
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setOngoing(true)
-                .build()
+        val notification = NotificationCompat.Builder(
+            this,
+            "nova_service"
+        )
+            .setContentTitle("Nova")
+            .setContentText("Nova fut a háttérben")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setOngoing(true)
+            .build()
 
         startForeground(1001, notification)
 
@@ -38,27 +43,41 @@ class NovaService : Service() {
             return
         }
 
-        recognizer =
-            SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
         recognizer?.setRecognitionListener(
             object : RecognitionListener {
 
-                override fun onReadyForSpeech(params: Bundle?) {}
+                override fun onReadyForSpeech(
+                    params: Bundle?
+                ) {
+                }
 
-                override fun onBeginningOfSpeech() {}
+                override fun onBeginningOfSpeech() {
+                }
 
-                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onRmsChanged(
+                    rmsdB: Float
+                ) {
+                }
 
-                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onBufferReceived(
+                    buffer: ByteArray?
+                ) {
+                }
 
-                override fun onEndOfSpeech() {}
+                override fun onEndOfSpeech() {
+                }
 
-                override fun onError(error: Int) {
+                override fun onError(
+                    error: Int
+                ) {
                     startListening()
                 }
 
-                override fun onResults(results: Bundle?) {
+                override fun onResults(
+                    results: Bundle?
+                ) {
 
                     val matches =
                         results?.getStringArrayList(
@@ -78,38 +97,39 @@ class NovaService : Service() {
 
                 override fun onPartialResults(
                     partialResults: Bundle?
-                ) {}
+                ) {
+                }
 
                 override fun onEvent(
                     eventType: Int,
                     params: Bundle?
-                ) {}
+                ) {
+                }
             }
         )
     }
 
     private fun startListening() {
 
-        val intent =
-            Intent(
-                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-            ).apply {
+        val intent = Intent(
+            RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+        ).apply {
 
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
 
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE,
-                    Locale.getDefault()
-                )
+            putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault()
+            )
 
-                putExtra(
-                    RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                    false
-                )
-            }
+            putExtra(
+                RecognizerIntent.EXTRA_PARTIAL_RESULTS,
+                false
+            )
+        }
 
         try {
             recognizer?.startListening(intent)
@@ -119,15 +139,14 @@ class NovaService : Service() {
 
     private fun handleCommand(text: String) {
 
-        if (!text.contains("nova") &&
+        if (
+            !text.contains("nova") &&
             !text.contains("noa")
         ) {
             return
         }
 
-        /*
-         * NOVA OFF
-         */
+        // NOVA LEÁLLÍTÁSA
 
         if (
             text.contains("off") ||
@@ -139,41 +158,39 @@ class NovaService : Service() {
             return
         }
 
-        /*
-         * TIMER
-         */
+        // IDŐZÍTŐ
 
         if (
             text.contains("időzítő") ||
             text.contains("idozito")
         ) {
+
             val minutes =
                 Regex("""(\d+)""")
                     .find(text)
                     ?.groupValues
-                    ?.get(1)
+                    ?.getOrNull(1)
                     ?.toLongOrNull()
 
             if (minutes != null) {
 
-                val intent =
-                    Intent(
-                        android.provider.AlarmClock.ACTION_SET_TIMER
-                    ).apply {
+                val intent = Intent(
+                    android.provider.AlarmClock.ACTION_SET_TIMER
+                ).apply {
 
-                        putExtra(
-                            android.provider.AlarmClock.EXTRA_LENGTH,
-                            (minutes * 60).toInt()
-                        )
+                    putExtra(
+                        android.provider.AlarmClock.EXTRA_LENGTH,
+                        (minutes * 60).toInt()
+                    )
 
-                        putExtra(
-                            android.provider.AlarmClock.EXTRA_SKIP_UI,
-                            false
-                        )
+                    putExtra(
+                        android.provider.AlarmClock.EXTRA_SKIP_UI,
+                        false
+                    )
 
-                        flags =
-                            Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
+                    flags =
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+                }
 
                 startActivity(intent)
             }
@@ -181,9 +198,7 @@ class NovaService : Service() {
             return
         }
 
-        /*
-         * WEB SEARCH
-         */
+        // GOOGLE KERESÉS
 
         if (
             text.contains("keress") ||
@@ -204,20 +219,18 @@ class NovaService : Service() {
 
                 val url =
                     "https://www.google.com/search?q=" +
-                        java.net.URLEncoder
-                            .encode(
-                                query,
-                                "UTF-8"
-                            )
+                        java.net.URLEncoder.encode(
+                            query,
+                            "UTF-8"
+                        )
 
-                val intent =
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        android.net.Uri.parse(url)
-                    ).apply {
-                        flags =
-                            Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
+                val intent = Intent(
+                    Intent.ACTION_VIEW,
+                    android.net.Uri.parse(url)
+                ).apply {
+                    flags =
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+                }
 
                 startActivity(intent)
             }
@@ -225,13 +238,10 @@ class NovaService : Service() {
             return
         }
 
-        /*
-         * OPEN APPS
-         */
+        // APP MEGNYITÁSA
 
         if (
             text.contains("nyisd") ||
-            text.contains("nyisd meg") ||
             text.contains("indítsd") ||
             text.contains("inditsd")
         ) {
@@ -257,10 +267,7 @@ class NovaService : Service() {
     private fun openApplication(name: String) {
 
         val apps =
-            packageManager
-                .getInstalledApplications(
-                    0
-                )
+            packageManager.getInstalledApplications(0)
 
         for (app in apps) {
 
@@ -291,9 +298,7 @@ class NovaService : Service() {
                     launchIntent.flags =
                         Intent.FLAG_ACTIVITY_NEW_TASK
 
-                    startActivity(
-                        launchIntent
-                    )
+                    startActivity(launchIntent)
 
                     return
                 }
@@ -303,21 +308,18 @@ class NovaService : Service() {
 
     private fun createNotificationChannel() {
 
-        val channel =
-            NotificationChannel(
-                "nova_service",
-                "Nova Background",
-                NotificationManager.IMPORTANCE_LOW
-            )
+        val channel = NotificationChannel(
+            "nova_service",
+            "Nova Background",
+            NotificationManager.IMPORTANCE_LOW
+        )
 
         val manager =
             getSystemService(
                 NotificationManager::class.java
             )
 
-        manager.createNotificationChannel(
-            channel
-        )
+        manager.createNotificationChannel(channel)
     }
 
     override fun onDestroy() {
@@ -330,5 +332,7 @@ class NovaService : Service() {
 
     override fun onBind(
         intent: Intent?
-    ): IBinder? = null
+    ): IBinder? {
+        return null
+    }
 }
