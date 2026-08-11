@@ -1,288 +1,424 @@
 package com.nova.mobile
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Text
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
 
+    private var debugText by mutableStateOf(
+        """
+        🟡 Nova Debug
+        Service: várakozás...
+        🎤 Mikrofon: -
+        👂 Hallotta: -
+        🧠 Parancs: -
+        ⚙️ Művelet: -
+        ❌ Hiba: -
+        """.trimIndent()
+    )
+
+    private val debugReceiver =
+        object : BroadcastReceiver() {
+
+            override fun onReceive(
+                context: Context?,
+                intent: Intent?
+            ) {
+
+                if (
+                    intent?.action ==
+                    NovaService.ACTION_DEBUG
+                ) {
+
+                    val text =
+                        intent.getStringExtra(
+                            NovaService.EXTRA_DEBUG_TEXT
+                        )
+
+                    if (
+                        !text.isNullOrBlank()
+                    ) {
+
+                        debugText = text
+                    }
+                }
+            }
+        }
+
     private val microphonePermission =
         registerForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
+
             if (granted) {
                 startNovaService()
+            } else {
+
+                debugText =
+                    """
+                    🔴 Nova Debug
+
+                    🎤 Mikrofon: ❌ NINCS ENGEDÉLY
+
+                    Engedélyezd a mikrofont,
+                    hogy Nova hallhasson.
+                    """.trimIndent()
             }
         }
 
     private val notificationPermission =
         registerForActivityResult(
             ActivityResultContracts.RequestPermission()
-        ) { }
+        ) {
+            startNovaService()
+        }
 
     override fun onCreate(
         savedInstanceState: Bundle?
     ) {
-        super.onCreate(savedInstanceState)
+        super.onCreate(
+            savedInstanceState
+        )
 
         /*
-         * MICROPHONE PERMISSION
+         * DEBUG RECEIVER
          */
 
-        if (
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.RECORD_AUDIO
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            microphonePermission.launch(
-                Manifest.permission.RECORD_AUDIO
+        val filter =
+            IntentFilter(
+                NovaService.ACTION_DEBUG
             )
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.TIRAMISU
+        ) {
+
+            registerReceiver(
+                debugReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+
         } else {
-            startNovaService()
+
+            @Suppress("DEPRECATION")
+            registerReceiver(
+                debugReceiver,
+                filter
+            )
         }
 
         /*
-         * NOTIFICATION PERMISSION
+         * UI
+         */
+
+        setContent {
+
+            NovaDebugScreen(
+                debugText = debugText
+            )
+        }
+
+        /*
+         * MICROPHONE
+         */
+
+        checkMicrophonePermission()
+
+        /*
+         * NOTIFICATION
          */
 
         if (
             Build.VERSION.SDK_INT >=
             Build.VERSION_CODES.TIRAMISU
         ) {
+
             if (
                 ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
+                ) !=
+                PackageManager.PERMISSION_GRANTED
             ) {
+
                 notificationPermission.launch(
                     Manifest.permission.POST_NOTIFICATIONS
                 )
             }
         }
+    }
 
-        /*
-         * NOVA UI
-         */
+    private fun checkMicrophonePermission() {
 
-        setContent {
-            NovaScreen()
+        if (
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO
+            ) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+
+            microphonePermission.launch(
+                Manifest.permission.RECORD_AUDIO
+            )
+
+        } else {
+
+            startNovaService()
         }
     }
 
     private fun startNovaService() {
 
-        val serviceIntent =
+        val intent =
             Intent(
                 this,
                 NovaService::class.java
             )
 
-        if (
-            Build.VERSION.SDK_INT >=
-            Build.VERSION_CODES.O
+        try {
+
+            if (
+                Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.O
+            ) {
+
+                startForegroundService(
+                    intent
+                )
+
+            } else {
+
+                @Suppress("DEPRECATION")
+                startService(
+                    intent
+                )
+            }
+
+        } catch (
+            e: Exception
         ) {
-            startForegroundService(
-                serviceIntent
-            )
-        } else {
-            startService(
-                serviceIntent
-            )
+
+            debugText =
+                """
+                🔴 Nova Debug
+
+                ❌ Service indítási hiba:
+
+                ${e.message}
+                """.trimIndent()
         }
+    }
+
+    override fun onDestroy() {
+
+        try {
+            unregisterReceiver(
+                debugReceiver
+            )
+        } catch (
+            _: Exception
+        ) {
+        }
+
+        super.onDestroy()
     }
 }
 
 /*
- * NOVA UI
+ * DEBUG UI
  */
 
 @Composable
-fun NovaScreen() {
+fun NovaDebugScreen(
+    debugText: String
+) {
 
-    val transition =
-        rememberInfiniteTransition(
-            label = "NovaCore"
-        )
+    val scrollState =
+        rememberScrollState()
 
-    val pulse by transition.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.08f,
-        animationSpec =
-            infiniteRepeatable(
-                animation =
-                    tween(
-                        1200,
-                        easing = EaseInOut
-                    ),
-                repeatMode =
-                    RepeatMode.Reverse
-            ),
-        label = "Pulse"
-    )
-
-    Box(
+    Column(
         modifier =
             Modifier
                 .fillMaxSize()
-                .background(Color.Black),
-        contentAlignment =
-            Alignment.Center
+                .background(
+                    Color(0xFF080808)
+                )
+                .padding(16.dp)
+                .verticalScroll(
+                    scrollState
+                )
     ) {
 
-        Canvas(
-            modifier =
-                Modifier.fillMaxSize()
-        ) {
-
-            val center =
-                androidx.compose.ui.geometry.Offset(
-                    size.width / 2f,
-                    size.height / 2f
-                )
-
-            val radius =
-                70.dp.toPx() * pulse
-
-            /*
-             * OUTER GLOW
-             */
-
-            drawCircle(
-                brush =
-                    Brush.radialGradient(
-                        colors =
-                            listOf(
-                                Color(0xFF00E5FF)
-                                    .copy(alpha = 0.35f),
-
-                                Color(0xFF0066FF)
-                                    .copy(alpha = 0.15f),
-
-                                Color.Transparent
-                            ),
-
-                        center = center,
-
-                        radius =
-                            radius * 2.8f
-                    ),
-
-                radius =
-                    radius * 2.8f,
-
-                center = center
-            )
-
-            /*
-             * CORE
-             */
-
-            drawCircle(
-                color =
-                    Color(0xFF00E5FF),
-
-                radius =
-                    radius,
-
-                center =
-                    center
-            )
-
-            /*
-             * SMALL WHITE LIGHT
-             */
-
-            drawCircle(
-                color =
-                    Color.White,
-
-                radius =
-                    radius * 0.13f,
-
-                center =
-                    androidx.compose.ui.geometry.Offset(
-                        center.x -
-                            radius * 0.28f,
-
-                        center.y -
-                            radius * 0.28f
-                    )
-            )
-        }
-
         /*
-         * TEXT
+         * TITLE
          */
 
-        Column(
-            horizontalAlignment =
-                Alignment.CenterHorizontally,
+        Text(
+            text = "NOVA",
+            color =
+                Color(0xFF00E5FF),
+            fontSize = 30.sp
+        )
 
+        Text(
+            text = "DEBUG CONSOLE",
+            color = Color.Gray,
+            fontSize = 13.sp
+        )
+
+        Spacer(
             modifier =
-                Modifier.offset(
-                    y = 125.dp
+                Modifier.height(20.dp)
+        )
+
+        /*
+         * STATUS
+         */
+
+        Card(
+            modifier =
+                Modifier.fillMaxWidth(),
+            colors =
+                CardDefaults.cardColors(
+                    containerColor =
+                        Color(0xFF111111)
                 )
         ) {
 
-            Text(
-                text = "N O V A",
-
-                color =
-                    Color.White,
-
-                fontSize =
-                    18.sp
-            )
-
-            Spacer(
+            Column(
                 modifier =
-                    Modifier.height(8.dp)
-            )
+                    Modifier.padding(16.dp)
+            ) {
 
-            Text(
-                text = "ACTIVE",
+                Text(
+                    text = "LIVE STATUS",
+                    color =
+                        Color(0xFF00E5FF),
+                    fontSize = 15.sp
+                )
 
-                color =
-                    Color(0xFF00E5FF),
+                Spacer(
+                    modifier =
+                        Modifier.height(12.dp)
+                )
 
-                fontSize =
-                    10.sp
-            )
+                Text(
+                    text =
+                        debugText,
+                    color =
+                        Color.White,
+                    fontSize = 14.sp
+                )
+            }
+        }
 
-            Spacer(
-                modifier =
-                    Modifier.height(8.dp)
-            )
+        Spacer(
+            modifier =
+                Modifier.height(16.dp)
+        )
+
+        /*
+         * RAW DEBUG
+         */
+
+        Text(
+            text = "RAW DEBUG OUTPUT",
+            color =
+                Color(0xFF00E5FF),
+            fontSize = 14.sp
+        )
+
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Surface(
+            modifier =
+                Modifier.fillMaxWidth(),
+            color =
+                Color.Black
+        ) {
 
             Text(
                 text =
-                    "Background service running",
-
+                    debugText,
+                modifier =
+                    Modifier.padding(14.dp),
                 color =
-                    Color.Gray,
-
-                fontSize =
-                    10.sp
+                    Color(0xFFB8FFB8),
+                fontSize = 12.sp
             )
         }
+
+        Spacer(
+            modifier =
+                Modifier.height(20.dp)
+        )
+
+        /*
+         * COMMAND HELP
+         */
+
+        Text(
+            text =
+                "NOVA COMMAND DEBUG",
+            color =
+                Color(0xFF00E5FF),
+            fontSize = 14.sp
+        )
+
+        Spacer(
+            modifier =
+                Modifier.height(8.dp)
+        )
+
+        Text(
+            text =
+                """
+                🎤 Mikrofon
+                → mutatja, hogy a felismerő aktív-e
+
+                👂 Hallotta
+                → amit a telefon felismert
+
+                🧠 Parancs
+                → amit Nova a "Nova" megszólításból
+                  levágva feldolgoz
+
+                ⚙️ Művelet
+                → amit végre akar hajtani
+
+                ❌ Hiba
+                → speech/service hiba
+                """.trimIndent(),
+            color =
+                Color.LightGray,
+            fontSize = 12.sp
+        )
     }
 }
