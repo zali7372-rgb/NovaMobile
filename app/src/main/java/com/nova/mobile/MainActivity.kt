@@ -3,14 +3,13 @@ package com.nova.mobile
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
@@ -25,393 +24,105 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
-    private var speechRecognizer: SpeechRecognizer? = null
-
-    private var novaActive by mutableStateOf(false)
-    private var listening by mutableStateOf(false)
-    private var lastCommand by mutableStateOf("Say \"Nova\"")
-
     private val microphonePermission =
         registerForActivityResult(
             ActivityResultContracts.RequestPermission()
         ) { granted ->
+
             if (granted) {
-                startListening()
-            } else {
-                lastCommand = "Microphone permission required"
+                startNovaService()
             }
         }
+
+    private val notificationPermission =
+        registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        setContent {
-            NovaScreen(
-                active = novaActive,
-                listening = listening,
-                text = lastCommand
-            )
-        }
-
-        setupSpeechRecognizer()
+        /*
+         * MICROPHONE PERMISSION
+         */
 
         if (
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
+            ) != PackageManager.PERMISSION_GRANTED
         ) {
-            startListening()
-        } else {
             microphonePermission.launch(
                 Manifest.permission.RECORD_AUDIO
             )
-        }
-    }
-
-    private fun setupSpeechRecognizer() {
-
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            lastCommand = "Speech recognition unavailable"
-            return
-        }
-
-        speechRecognizer =
-            SpeechRecognizer.createSpeechRecognizer(this)
-
-        speechRecognizer?.setRecognitionListener(
-            object : RecognitionListener {
-
-                override fun onReadyForSpeech(params: Bundle?) {
-                    listening = true
-                }
-
-                override fun onBeginningOfSpeech() {}
-
-                override fun onRmsChanged(rmsdB: Float) {}
-
-                override fun onBufferReceived(buffer: ByteArray?) {}
-
-                override fun onEndOfSpeech() {
-                    listening = false
-                }
-
-                override fun onError(error: Int) {
-                    listening = false
-
-                    // Restart listening automatically.
-                    startListening()
-                }
-
-                override fun onResults(results: Bundle?) {
-
-                    listening = false
-
-                    val matches =
-                        results?.getStringArrayList(
-                            SpeechRecognizer.RESULTS_RECOGNITION
-                        )
-
-                    val text =
-                        matches
-                            ?.firstOrNull()
-                            ?.lowercase(Locale.getDefault())
-                            ?: ""
-
-                    handleSpeech(text)
-
-                    startListening()
-                }
-
-                override fun onPartialResults(
-                    partialResults: Bundle?
-                ) {}
-
-                override fun onEvent(
-                    eventType: Int,
-                    params: Bundle?
-                ) {}
-            }
-        )
-    }
-
-    private fun startListening() {
-
-        val recognizer = speechRecognizer ?: return
-
-        val intent =
-            Intent(
-                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-            ).apply {
-
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
-
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE,
-                    Locale.getDefault()
-                )
-
-                putExtra(
-                    RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                    true
-                )
-
-                putExtra(
-                    RecognizerIntent.EXTRA_MAX_RESULTS,
-                    5
-                )
-            }
-
-        try {
-            recognizer.startListening(intent)
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun handleSpeech(text: String) {
-
-        if (text.isBlank()) return
-
-        lastCommand = text
-
-        val normalized =
-            text
-                .lowercase(Locale.getDefault())
-                .replace("á", "a")
-                .replace("é", "e")
-                .replace("í", "i")
-                .replace("ó", "o")
-                .replace("ö", "o")
-                .replace("ő", "o")
-                .replace("ú", "u")
-                .replace("ü", "u")
-                .replace("ű", "u")
-
-        /*
-         * NOVA ACTIVATION
-         */
-
-        val activationWords = listOf(
-            "nova",
-            "noa",
-            "nóva",
-            "hey nova",
-            "ok nova",
-            "okay nova"
-        )
-
-        val activated =
-            activationWords.any {
-                normalized.contains(it)
-            }
-
-        if (activated) {
-
-            val turningOff =
-                normalized.contains("off") ||
-                normalized.contains("ki") ||
-                normalized.contains("kikapcsol")
-
-            if (turningOff) {
-                novaActive = false
-                lastCommand = "Nova OFF"
-                return
-            }
-
-            novaActive = true
-
-            /*
-             * If there is an app command in the same sentence,
-             * process it immediately.
-             */
-            val command =
-                normalized
-                    .replace("nova", "")
-                    .replace("noa", "")
-                    .replace("hey", "")
-                    .replace("ok", "")
-                    .replace("okay", "")
-                    .trim()
-
-            if (command.isNotBlank()) {
-                openAppFromCommand(command)
-            } else {
-                lastCommand = "Nova ACTIVE"
-            }
-
-            return
+        } else {
+            startNovaService()
         }
 
         /*
-         * NOVA MUST BE ACTIVE FOR APP COMMANDS
+         * NOTIFICATION PERMISSION
          */
-
-        if (!novaActive) return
-
-        openAppFromCommand(normalized)
-    }
-
-    private fun openAppFromCommand(command: String) {
-
-        var cleaned =
-            command
-                .lowercase(Locale.getDefault())
-                .trim()
-
-        val wordsToRemove = listOf(
-            "nyisd meg",
-            "nyisd ki",
-            "inditsd el",
-            "inditsd",
-            "nyisd",
-            "meg",
-            "el",
-            "az",
-            "a",
-            "appot",
-            "alkalmazast",
-            "alkalmazást"
-        )
-
-        for (word in wordsToRemove) {
-            cleaned =
-                cleaned.replace(word, "")
-        }
-
-        cleaned =
-            cleaned
-                .replace("spotifyt", "spotify")
-                .replace("youtubet", "youtube")
-                .replace("discordot", "discord")
-                .replace("chromot", "chrome")
-                .replace("robloxot", "roblox")
-                .replace("gmailt", "gmail")
-                .replace("tiktokot", "tiktok")
-                .replace("mapset", "maps")
-                .replace("kamerat", "kamera")
-                .replace("fotokat", "fotok")
-                .trim()
-
-        if (cleaned.isBlank()) return
-
-        val apps =
-            packageManager
-                .getInstalledApplications(
-                    PackageManager.GET_META_DATA
-                )
-
-        var bestPackage: String? = null
-        var bestScore = 0
-
-        for (app in apps) {
-
-            val label =
-                packageManager
-                    .getApplicationLabel(app)
-                    .toString()
-                    .lowercase(Locale.getDefault())
-
-            val score =
-                calculateMatchScore(
-                    cleaned,
-                    label
-                )
-
-            if (score > bestScore) {
-                bestScore = score
-                bestPackage = app.packageName
-            }
-        }
 
         if (
-            bestPackage != null &&
-            bestScore >= 60
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.TIRAMISU
         ) {
 
-            val launchIntent =
-                packageManager
-                    .getLaunchIntentForPackage(
-                        bestPackage!!
-                    )
+            if (
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
 
-            if (launchIntent != null) {
-
-                lastCommand =
-                    "Opening: $cleaned"
-
-                try {
-                    startActivity(launchIntent)
-                    return
-                } catch (_: Exception) {
-                }
+                notificationPermission.launch(
+                    Manifest.permission.POST_NOTIFICATIONS
+                )
             }
         }
 
-        lastCommand =
-            "App not found: $cleaned"
+        /*
+         * NOVA UI
+         */
+
+        setContent {
+            NovaScreen()
+        }
     }
 
-    private fun calculateMatchScore(
-        command: String,
-        appName: String
-    ): Int {
+    private fun startNovaService() {
 
-        if (command == appName) {
-            return 100
-        }
+        val serviceIntent =
+            Intent(
+                this,
+                NovaService::class.java
+            )
 
-        if (appName.contains(command)) {
-            return 90
-        }
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.O
+        ) {
 
-        if (command.contains(appName)) {
-            return 85
-        }
+            startForegroundService(
+                serviceIntent
+            )
 
-        val commandWords =
-            command
-                .split(" ")
-                .filter { it.length >= 2 }
-
-        if (commandWords.isEmpty()) {
-            return 0
-        }
-
-        var matched = 0
-
-        for (word in commandWords) {
-            if (appName.contains(word)) {
-                matched++
-            }
-        }
-
-        return if (matched > 0) {
-            (matched.toFloat() /
-                    commandWords.size *
-                    80).toInt()
         } else {
-            0
+
+            startService(
+                serviceIntent
+            )
         }
-    }
-
-    override fun onDestroy() {
-
-        speechRecognizer?.destroy()
-        speechRecognizer = null
-
-        super.onDestroy()
     }
 }
 
+
+/*
+ * NOVA UI
+ */
+
 @Composable
-fun NovaScreen(
-    active: Boolean,
-    listening: Boolean,
-    text: String
-) {
+fun NovaScreen() {
 
     val transition =
         rememberInfiniteTransition(
@@ -423,10 +134,11 @@ fun NovaScreen(
         targetValue = 1.08f,
         animationSpec =
             infiniteRepeatable(
-                animation = tween(
-                    1200,
-                    easing = EaseInOut
-                ),
+                animation =
+                    tween(
+                        1200,
+                        easing = EaseInOut
+                    ),
                 repeatMode =
                     RepeatMode.Reverse
             ),
@@ -442,7 +154,7 @@ fun NovaScreen(
             Alignment.Center
     ) {
 
-        androidx.compose.foundation.Canvas(
+        Canvas(
             modifier =
                 Modifier.fillMaxSize()
         ) {
@@ -454,67 +166,112 @@ fun NovaScreen(
                 )
 
             val radius =
-                70.dp.toPx() *
-                    if (active) pulse else 0.85f
+                70.dp.toPx() * pulse
+
+            /*
+             * OUTER GLOW
+             */
 
             drawCircle(
                 brush =
                     Brush.radialGradient(
                         colors =
-                            if (active) {
-                                listOf(
-                                    Color(0xFF00E5FF)
-                                        .copy(alpha = 0.35f),
-                                    Color(0xFF0066FF)
-                                        .copy(alpha = 0.12f),
-                                    Color.Transparent
-                                )
-                            } else {
-                                listOf(
-                                    Color.Gray
-                                        .copy(alpha = 0.15f),
-                                    Color.Transparent
-                                )
-                            },
+                            listOf(
+                                Color(0xFF00E5FF)
+                                    .copy(alpha = 0.35f),
+
+                                Color(0xFF0066FF)
+                                    .copy(alpha = 0.15f),
+
+                                Color.Transparent
+                            ),
+
                         center = center,
-                        radius = radius * 2.8f
+
+                        radius =
+                            radius * 2.8f
                     ),
-                radius = radius * 2.8f,
+
+                radius =
+                    radius * 2.8f,
+
                 center = center
             )
+
+            /*
+             * CORE
+             */
 
             drawCircle(
                 color =
-                    if (active)
-                        Color(0xFF00E5FF)
-                    else
-                        Color.DarkGray,
-                radius = radius,
-                center = center
+                    Color(0xFF00E5FF),
+
+                radius =
+                    radius,
+
+                center =
+                    center
             )
 
+            /*
+             * SMALL WHITE LIGHT
+             */
+
             drawCircle(
-                color = Color.White,
-                radius = radius * 0.13f,
+                color =
+                    Color.White,
+
+                radius =
+                    radius * 0.13f,
+
                 center =
                     androidx.compose.ui.geometry.Offset(
-                        center.x - radius * 0.28f,
-                        center.y - radius * 0.28f
+                        center.x -
+                            radius * 0.28f,
+
+                        center.y -
+                            radius * 0.28f
                     )
             )
         }
 
+        /*
+         * TEXT
+         */
+
         Column(
             horizontalAlignment =
                 Alignment.CenterHorizontally,
+
             modifier =
-                Modifier.offset(y = 125.dp)
+                Modifier.offset(
+                    y = 125.dp
+                )
         ) {
 
             Text(
                 text = "N O V A",
-                color = Color.White,
-                fontSize = 18.sp
+
+                color =
+                    Color.White,
+
+                fontSize =
+                    18.sp
+            )
+
+            Spacer(
+                modifier =
+                    Modifier.height(8.dp)
+            )
+
+            Text(
+                text = "ACTIVE",
+
+                color =
+                    Color(0xFF00E5FF),
+
+                fontSize =
+                    10.sp
             )
 
             Spacer(
@@ -524,28 +281,13 @@ fun NovaScreen(
 
             Text(
                 text =
-                    when {
-                        active -> "ACTIVE"
-                        listening -> "LISTENING"
-                        else -> "READY"
-                    },
+                    "Background service running",
+
                 color =
-                    if (active)
-                        Color(0xFF00E5FF)
-                    else
-                        Color.Gray,
-                fontSize = 10.sp
-            )
+                    Color.Gray,
 
-            Spacer(
-                modifier =
-                    Modifier.height(8.dp)
-            )
-
-            Text(
-                text = text,
-                color = Color.Gray,
-                fontSize = 11.sp
+                fontSize =
+                    10.sp
             )
         }
     }
