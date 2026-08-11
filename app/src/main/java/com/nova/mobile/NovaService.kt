@@ -4,13 +4,20 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
+import android.provider.AlarmClock
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import androidx.core.app.NotificationCompat
+import java.net.URLEncoder
+import java.util.Calendar
 import java.util.Locale
 
 class NovaService : Service(), TextToSpeech.OnInitListener {
@@ -36,7 +43,10 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
 
         startForeground(1001, notification)
 
-        textToSpeech = TextToSpeech(this, this)
+        textToSpeech = TextToSpeech(
+            this,
+            this
+        )
 
         setupRecognizer()
         startListening()
@@ -46,10 +56,16 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
 
         if (status == TextToSpeech.SUCCESS) {
 
-            textToSpeech?.language = Locale.getDefault()
+            textToSpeech?.language =
+                Locale.getDefault()
 
-            textToSpeech?.setSpeechRate(1.0f)
-            textToSpeech?.setPitch(1.0f)
+            textToSpeech?.setSpeechRate(
+                1.0f
+            )
+
+            textToSpeech?.setPitch(
+                1.0f
+            )
         }
     }
 
@@ -73,7 +89,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 isSpeaking = false
                 startListening()
             },
-            1500
+            1800
         )
     }
 
@@ -83,7 +99,10 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
-        recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer =
+            SpeechRecognizer.createSpeechRecognizer(
+                this
+            )
 
         recognizer?.setRecognitionListener(
             object : RecognitionListener {
@@ -114,11 +133,14 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                 ) {
 
                     if (!isSpeaking) {
-                        android.os.Handler(mainLooper).postDelayed(
+
+                        android.os.Handler(
+                            mainLooper
+                        ).postDelayed(
                             {
                                 startListening()
                             },
-                            500
+                            700
                         )
                     }
                 }
@@ -135,7 +157,9 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     val text =
                         matches
                             ?.firstOrNull()
-                            ?.lowercase(Locale.getDefault())
+                            ?.lowercase(
+                                Locale.getDefault()
+                            )
                             ?: ""
 
                     handleCommand(text)
@@ -191,13 +215,21 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
 
         try {
 
-            recognizer?.startListening(intent)
+            recognizer?.startListening(
+                intent
+            )
 
         } catch (_: Exception) {
         }
     }
 
-    private fun handleCommand(text: String) {
+    private fun handleCommand(
+        originalText: String
+    ) {
+
+        val text = normalizeText(
+            originalText
+        )
 
         if (
             !text.contains("nova") &&
@@ -211,8 +243,6 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             .replace("noa", "")
             .trim()
 
-        // CSAK A „NOVA” MEGSZÓLÍTÁS
-
         if (command.isBlank()) {
 
             speak(
@@ -221,221 +251,940 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                     "Hallgatlak.",
                     "Miben segíthetek?",
                     "Parancs?",
-                    "Itt vagyok."
+                    "Itt vagyok.",
+                    "Mondjad.",
+                    "Mit szeretnél?",
+                    "Figyelek.",
+                    "Igen, itt vagyok.",
+                    "Miben segíthetek?"
                 ).random()
             )
 
             return
         }
 
-        // NOVA LEÁLLÍTÁSA
-
-        if (
-            text.contains("off") ||
-            text.contains("ki") ||
-            text.contains("állj") ||
-            text.contains("allj")
-        ) {
-
-            speak("Rendben.")
-
-            android.os.Handler(mainLooper).postDelayed(
-                {
-                    stopSelf()
-                },
-                1000
-            )
-
+        if (handleStopCommand(command)) {
             return
         }
 
-        // IDŐZÍTŐ
-
-        if (
-            text.contains("időzítő") ||
-            text.contains("idozito")
-        ) {
-
-            val minutes =
-                Regex("""(\d+)""")
-                    .find(text)
-                    ?.groupValues
-                    ?.getOrNull(1)
-                    ?.toLongOrNull()
-
-            if (minutes != null) {
-
-                speak(
-                    "$minutes perces időzítőt állítok be."
-                )
-
-                val intent = Intent(
-                    android.provider.AlarmClock.ACTION_SET_TIMER
-                ).apply {
-
-                    putExtra(
-                        android.provider.AlarmClock.EXTRA_LENGTH,
-                        (minutes * 60).toInt()
-                    )
-
-                    putExtra(
-                        android.provider.AlarmClock.EXTRA_SKIP_UI,
-                        false
-                    )
-
-                    flags =
-                        Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-
-                android.os.Handler(mainLooper).postDelayed(
-                    {
-                        try {
-                            startActivity(intent)
-                        } catch (_: Exception) {
-                        }
-                    },
-                    1000
-                )
-            } else {
-
-                speak(
-                    "Hány perces időzítőt állítsak be?"
-                )
-            }
-
+        if (handleTimerCommand(command)) {
             return
         }
 
-        // GOOGLE KERESÉS
-
-        if (
-            text.contains("keress") ||
-            text.contains("keresés") ||
-            text.contains("kereses")
-        ) {
-
-            val query =
-                text
-                    .replace("nova", "")
-                    .replace("noa", "")
-                    .replace("keress rá", "")
-                    .replace("keress ra", "")
-                    .replace("keress", "")
-                    .trim()
-
-            if (query.isNotBlank()) {
-
-                speak("Rákeresek.")
-
-                val url =
-                    "https://www.google.com/search?q=" +
-                        java.net.URLEncoder.encode(
-                            query,
-                            "UTF-8"
-                        )
-
-                val intent = Intent(
-                    Intent.ACTION_VIEW,
-                    android.net.Uri.parse(url)
-                ).apply {
-
-                    flags =
-                        Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-
-                android.os.Handler(mainLooper).postDelayed(
-                    {
-                        try {
-                            startActivity(intent)
-                        } catch (_: Exception) {
-                        }
-                    },
-                    1000
-                )
-
-            } else {
-
-                speak(
-                    "Mit keressek?"
-                )
-            }
-
+        if (handleSearchCommand(command)) {
             return
         }
 
-        // APP MEGNYITÁSA
-
-        if (
-            text.contains("nyisd") ||
-            text.contains("indítsd") ||
-            text.contains("inditsd")
-        ) {
-
-            val appName =
-                text
-                    .replace("nova", "")
-                    .replace("noa", "")
-                    .replace("nyisd meg", "")
-                    .replace("nyisd", "")
-                    .replace("indítsd el", "")
-                    .replace("inditsd el", "")
-                    .replace("indítsd", "")
-                    .replace("inditsd", "")
-                    .trim()
-
-            if (appName.isNotBlank()) {
-
-                speak(
-                    "Megnyitom."
-                )
-
-                android.os.Handler(mainLooper).postDelayed(
-                    {
-                        openApplication(appName)
-                    },
-                    1000
-                )
-
-            } else {
-
-                speak(
-                    "Melyik alkalmazást nyissam meg?"
-                )
-            }
-
+        if (handleCallCommand(command)) {
             return
         }
 
-        // ISMERETLEN PARANCS
+        if (handleTimeCommand(command)) {
+            return
+        }
+
+        if (handleDateCommand(command)) {
+            return
+        }
+
+        if (handleWebsiteCommand(command)) {
+            return
+        }
+
+        if (handleVolumeCommand(command)) {
+            return
+        }
+
+        if (handleSettingsCommand(command)) {
+            return
+        }
+
+        if (handleApplicationCommand(command)) {
+            return
+        }
 
         speak(
             "Ezt a parancsot még nem ismerem."
         )
     }
 
-    private fun openApplication(
-        name: String
-    ) {
+    private fun normalizeText(
+        text: String
+    ): String {
+
+        return text
+            .lowercase(Locale.getDefault())
+            .replace("á", "a")
+            .replace("é", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("ö", "o")
+            .replace("ő", "o")
+            .replace("ú", "u")
+            .replace("ü", "u")
+            .replace("ű", "u")
+            .trim()
+    }
+
+    private fun handleStopCommand(
+        text: String
+    ): Boolean {
+
+        val commands = listOf(
+            "allj",
+            "allj le",
+            "allj meg",
+            "kapcsold ki",
+            "kapcsold le",
+            "nova allj",
+            "nova allj le",
+            "fejezd be",
+            "fejezd be a novat",
+            "allitsd le magad",
+            "leallitas",
+            "allj le nova",
+            "nova kikapcsolasa",
+            "kapcsold ki a novat",
+            "nova alljon le",
+            "allj mar",
+            "hagyd abba",
+            "stop",
+            "off"
+        )
+
+        if (
+            commands.any {
+                text.contains(it)
+            }
+        ) {
+
+            speak("Rendben, leállok.")
+
+            android.os.Handler(
+                mainLooper
+            ).postDelayed(
+                {
+                    stopSelf()
+                },
+                1200
+            )
+
+            return true
+        }
+
+        return false
+    }
+
+    private fun handleTimerCommand(
+        text: String
+    ): Boolean {
+
+        val timerWords = listOf(
+            "idozito",
+            "idozitot",
+            "idozites",
+            "timer",
+            "allits be egy idozitot",
+            "allits be idozitot",
+            "indits egy idozitot",
+            "indits idozitot",
+            "tegyel be egy idozitot",
+            "tegyel be idozitot",
+            "kell egy idozito",
+            "szeretnek egy idozitot"
+        )
+
+        if (
+            !timerWords.any {
+                text.contains(it)
+            }
+        ) {
+            return false
+        }
+
+        val number =
+            Regex("""(\d+)""")
+                .find(text)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toLongOrNull()
+
+        if (number == null) {
+
+            speak(
+                "Hány perces időzítőt állítsak?"
+            )
+
+            return true
+        }
+
+        speak(
+            "$number perces időzítőt állítok be."
+        )
+
+        val intent = Intent(
+            AlarmClock.ACTION_SET_TIMER
+        ).apply {
+
+            putExtra(
+                AlarmClock.EXTRA_LENGTH,
+                (number * 60).toInt()
+            )
+
+            putExtra(
+                AlarmClock.EXTRA_SKIP_UI,
+                false
+            )
+
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+
+        android.os.Handler(
+            mainLooper
+        ).postDelayed(
+            {
+                try {
+                    startActivity(intent)
+                } catch (_: Exception) {
+                }
+            },
+            1000
+        )
+
+        return true
+    }
+
+    private fun handleSearchCommand(
+        text: String
+    ): Boolean {
+
+        val searchWords = listOf(
+            "keress ra",
+            "keress",
+            "keress ra erre",
+            "googlezd meg",
+            "keress ra googleben",
+            "keresd meg",
+            "keresd ki",
+            "nezz utana",
+            "nezz ra",
+            "keress ra erre a dologra",
+            "talald meg",
+            "keress nekem",
+            "keress valamit",
+            "google keres",
+            "google kereses",
+            "indits google keresest"
+        )
+
+        if (
+            !searchWords.any {
+                text.contains(it)
+            }
+        ) {
+            return false
+        }
+
+        var query = text
+
+        searchWords.forEach {
+            query = query.replace(
+                it,
+                ""
+            )
+        }
+
+        query = query
+            .trim()
+            .removePrefix("a ")
+            .removePrefix("az ")
+            .trim()
+
+        if (query.isBlank()) {
+
+            speak(
+                "Mit keressek?"
+            )
+
+            return true
+        }
+
+        speak(
+            "Rákeresek."
+        )
+
+        val url =
+            "https://www.google.com/search?q=" +
+                URLEncoder.encode(
+                    query,
+                    "UTF-8"
+                )
+
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse(url)
+        ).apply {
+
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+
+        android.os.Handler(
+            mainLooper
+        ).postDelayed(
+            {
+                try {
+                    startActivity(intent)
+                } catch (_: Exception) {
+                }
+            },
+            900
+        )
+
+        return true
+    }
+
+    private fun handleCallCommand(
+        text: String
+    ): Boolean {
+
+        val words = listOf(
+            "hivd fel",
+            "hivd",
+            "telefonalj",
+            "telefonalj fel",
+            "indits hivast",
+            "hivast indits",
+            "hivj fel",
+            "csorogj ra",
+            "hivd fel ezt a szamot",
+            "telefonalj ennek",
+            "hivast kezdemenyezz",
+            "indits telefonhivast"
+        )
+
+        if (
+            !words.any {
+                text.contains(it)
+            }
+        ) {
+            return false
+        }
+
+        val number =
+            Regex("""[\d +()-]{6,}""")
+                .find(text)
+                ?.value
+                ?.trim()
+
+        if (number.isNullOrBlank()) {
+
+            speak(
+                "Melyik számot hívjam?"
+            )
+
+            return true
+        }
+
+        speak(
+            "Megnyitom a hívást."
+        )
+
+        val intent = Intent(
+            Intent.ACTION_DIAL
+        ).apply {
+
+            data = Uri.parse(
+                "tel:" + number
+            )
+
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+
+        android.os.Handler(
+            mainLooper
+        ).postDelayed(
+            {
+                try {
+                    startActivity(intent)
+                } catch (_: Exception) {
+                }
+            },
+            900
+        )
+
+        return true
+    }
+
+    private fun handleTimeCommand(
+        text: String
+    ): Boolean {
+
+        val words = listOf(
+            "mennyi az ido",
+            "hany ora van",
+            "hany ora",
+            "mondd meg az idot",
+            "mi az ido",
+            "pontos ido",
+            "aktualis ido",
+            "mennyi a pontos ido"
+        )
+
+        if (
+            !words.any {
+                text.contains(it)
+            }
+        ) {
+            return false
+        }
+
+        val calendar =
+            Calendar.getInstance()
+
+        val hour =
+            calendar.get(Calendar.HOUR_OF_DAY)
+
+        val minute =
+            calendar.get(Calendar.MINUTE)
+
+        speak(
+            "Most $hour óra $minute perc van."
+        )
+
+        return true
+    }
+
+    private fun handleDateCommand(
+        text: String
+    ): Boolean {
+
+        val words = listOf(
+            "mai datum",
+            "milyen nap van",
+            "hanyadika van",
+            "mi a datum",
+            "mondd meg a datumot",
+            "milyen datum van",
+            "mai nap",
+            "melyik nap van ma"
+        )
+
+        if (
+            !words.any {
+                text.contains(it)
+            }
+        ) {
+            return false
+        }
+
+        val calendar =
+            Calendar.getInstance()
+
+        val day =
+            calendar.get(Calendar.DAY_OF_MONTH)
+
+        val month =
+            calendar.get(Calendar.MONTH) + 1
+
+        val year =
+            calendar.get(Calendar.YEAR)
+
+        speak(
+            "Ma $year. év $month. hónap $day. napja van."
+        )
+
+        return true
+    }
+
+    private fun handleWebsiteCommand(
+        text: String
+    ): Boolean {
+
+        val websites =
+            mapOf(
+                "youtube" to "https://youtube.com",
+                "google" to "https://google.com",
+                "facebook" to "https://facebook.com",
+                "instagram" to "https://instagram.com",
+                "tiktok" to "https://tiktok.com",
+                "discord" to "https://discord.com",
+                "reddit" to "https://reddit.com",
+                "wikipedia" to "https://wikipedia.org"
+            )
+
+        val openWords = listOf(
+            "nyisd meg",
+            "nyisd ki",
+            "nyisd",
+            "menj a",
+            "lepj a",
+            "nyisd meg az",
+            "inditsd el"
+        )
+
+        if (
+            !openWords.any {
+                text.contains(it)
+            }
+        ) {
+            return false
+        }
+
+        for (
+            entry in websites
+        ) {
+
+            if (
+                text.contains(
+                    entry.key
+                )
+            ) {
+
+                speak(
+                    "Megnyitom."
+                )
+
+                val intent =
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse(
+                            entry.value
+                        )
+                    ).apply {
+
+                        flags =
+                            Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+
+                android.os.Handler(
+                    mainLooper
+                ).postDelayed(
+                    {
+                        try {
+                            startActivity(intent)
+                        } catch (_: Exception) {
+                        }
+                    },
+                    900
+                )
+
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private fun handleVolumeCommand(
+        text: String
+    ): Boolean {
+
+        val audio =
+            getSystemService(
+                AUDIO_SERVICE
+            ) as AudioManager
+
+        if (
+            text.contains("hangero fel") ||
+            text.contains("hangositsd fel") ||
+            text.contains("hangositsd")
+        ) {
+
+            audio.adjustVolume(
+                AudioManager.ADJUST_RAISE,
+                AudioManager.FLAG_SHOW_UI
+            )
+
+            speak("Felvettem a hangerőt.")
+
+            return true
+        }
+
+        if (
+            text.contains("hangero le") ||
+            text.contains("halkitsd le") ||
+            text.contains("halkitsd")
+        ) {
+
+            audio.adjustVolume(
+                AudioManager.ADJUST_LOWER,
+                AudioManager.FLAG_SHOW_UI
+            )
+
+            speak("Levettem a hangerőt.")
+
+            return true
+        }
+
+        if (
+            text.contains("nemitsd el") ||
+            text.contains("ne mitsd el") ||
+            text.contains("nema")
+        ) {
+
+            audio.adjustVolume(
+                AudioManager.ADJUST_MUTE,
+                AudioManager.FLAG_SHOW_UI
+            )
+
+            speak("Lenémítottam.")
+
+            return true
+        }
+
+        return false
+    }
+
+    private fun handleSettingsCommand(
+        text: String
+    ): Boolean {
+
+        if (
+            text.contains(
+                "nyisd meg a beallitasokat"
+            ) ||
+            text.contains(
+                "nyisd meg a beallitast"
+            ) ||
+            text.contains(
+                "beallitasok megnyitasa"
+            ) ||
+            text.contains(
+                "inditsd el a beallitasokat"
+            ) ||
+            text.contains(
+                "menj a beallitasokhoz"
+            )
+        ) {
+
+            speak(
+                "Megnyitom a beállításokat."
+            )
+
+            val intent = Intent(
+                Settings.ACTION_SETTINGS
+            ).apply {
+                flags =
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+
+            android.os.Handler(
+                mainLooper
+            ).postDelayed(
+                {
+                    try {
+                        startActivity(intent)
+                    } catch (_: Exception) {
+                    }
+                },
+                900
+            )
+
+            return true
+        }
+
+        return false
+    }
+
+    private fun handleApplicationCommand(
+        text: String
+    ): Boolean {
+
+        val openWords = listOf(
+            "nyisd meg",
+            "nyisd ki",
+            "nyisd",
+            "inditsd el",
+            "inditsd",
+            "nyissa meg",
+            "nyissa ki",
+            "nyisd meg nekem",
+            "nyisd ki nekem",
+            "menj a",
+            "menj bele",
+            "lepj be",
+            "lepj a",
+            "kapcsold be",
+            "inditsd be",
+            "indits el",
+            "inditsd el nekem",
+            "nyisd meg nekem a",
+            "mutasd",
+            "hozd be",
+            "nyisd ki nekem",
+            "inditsd el nekem"
+        )
+
+        if (
+            !openWords.any {
+                text.contains(it)
+            }
+        ) {
+            return false
+        }
 
         val apps =
-            packageManager.getInstalledApplications(0)
+            mapOf(
 
-        for (app in apps) {
+                "youtube" to listOf(
+                    "youtube",
+                    "youtubeot",
+                    "youtube ra",
+                    "youtube app"
+                ),
+
+                "discord" to listOf(
+                    "discord",
+                    "discordot",
+                    "discord app"
+                ),
+
+                "spotify" to listOf(
+                    "spotify",
+                    "spotifyt",
+                    "spotify app"
+                ),
+
+                "tiktok" to listOf(
+                    "tiktok",
+                    "tiktokot",
+                    "tiktok app"
+                ),
+
+                "chrome" to listOf(
+                    "chrome",
+                    "chromeot",
+                    "google chrome"
+                ),
+
+                "maps" to listOf(
+                    "maps",
+                    "google maps",
+                    "mapset",
+                    "terkep",
+                    "terkepeket"
+                ),
+
+                "kamera" to listOf(
+                    "kamera",
+                    "kamerat",
+                    "kamera app"
+                ),
+
+                "galeria" to listOf(
+                    "galeria",
+                    "galeriat",
+                    "kepek",
+                    "fotok"
+                ),
+
+                "gmail" to listOf(
+                    "gmail",
+                    "gmailt",
+                    "gmail app"
+                ),
+
+                "telefon" to listOf(
+                    "telefon",
+                    "telefont",
+                    "telefon app"
+                ),
+
+                "uzenetek" to listOf(
+                    "uzenetek",
+                    "uzeneteket",
+                    "uzenet",
+                    "sms"
+                ),
+
+                "beallitasok" to listOf(
+                    "beallitasok",
+                    "beallitas",
+                    "beallitast"
+                ),
+
+                "ora" to listOf(
+                    "ora",
+                    "orat",
+                    "ora app",
+                    "orak"
+                ),
+
+                "naptar" to listOf(
+                    "naptar",
+                    "naptarat",
+                    "calendar"
+                ),
+
+                "fajlok" to listOf(
+                    "fajlok",
+                    "fajlkezelo",
+                    "fajlokat",
+                    "dokumentumok"
+                )
+            )
+
+        for (
+            appEntry in apps
+        ) {
+
+            val aliases =
+                appEntry.value
+
+            if (
+                aliases.any {
+                    text.contains(it)
+                }
+            ) {
+
+                val target =
+                    appEntry.key
+
+                speak(
+                    "Megnyitom."
+                )
+
+                android.os.Handler(
+                    mainLooper
+                ).postDelayed(
+                    {
+                        launchKnownApplication(
+                            target
+                        )
+                    },
+                    900
+                )
+
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private fun launchKnownApplication(
+        target: String
+    ) {
+
+        val installedApps =
+            packageManager
+                .getInstalledApplications(
+                    PackageManager.GET_META_DATA
+                )
+
+        val aliases =
+            when (target) {
+
+                "youtube" ->
+                    listOf(
+                        "youtube"
+                    )
+
+                "discord" ->
+                    listOf(
+                        "discord"
+                    )
+
+                "spotify" ->
+                    listOf(
+                        "spotify"
+                    )
+
+                "tiktok" ->
+                    listOf(
+                        "tiktok"
+                    )
+
+                "chrome" ->
+                    listOf(
+                        "chrome"
+                    )
+
+                "maps" ->
+                    listOf(
+                        "maps",
+                        "térkép"
+                    )
+
+                "kamera" ->
+                    listOf(
+                        "kamera",
+                        "camera"
+                    )
+
+                "galeria" ->
+                    listOf(
+                        "galéria",
+                        "galery",
+                        "photos"
+                    )
+
+                "gmail" ->
+                    listOf(
+                        "gmail"
+                    )
+
+                "telefon" ->
+                    listOf(
+                        "telefon",
+                        "phone"
+                    )
+
+                "uzenetek" ->
+                    listOf(
+                        "üzenetek",
+                        "messages",
+                        "messages"
+                    )
+
+                "beallitasok" ->
+                    listOf(
+                        "beállítások",
+                        "settings"
+                    )
+
+                "ora" ->
+                    listOf(
+                        "óra",
+                        "clock"
+                    )
+
+                "naptar" ->
+                    listOf(
+                        "naptár",
+                        "calendar"
+                    )
+
+                "fajlok" ->
+                    listOf(
+                        "fájlok",
+                        "files",
+                        "file manager"
+                    )
+
+                else ->
+                    emptyList()
+            }
+
+        for (
+            app in installedApps
+        ) {
 
             val label =
                 packageManager
                     .getApplicationLabel(app)
                     .toString()
+                    .lowercase(
+                        Locale.getDefault()
+                    )
 
             if (
-                label.equals(
-                    name,
-                    ignoreCase = true
-                ) ||
-                label.contains(
-                    name,
-                    ignoreCase = true
-                )
+                aliases.any {
+                    label.contains(it)
+                }
             ) {
 
                 val launchIntent =
@@ -444,17 +1193,17 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
                             app.packageName
                         )
 
-                if (launchIntent != null) {
+                if (
+                    launchIntent != null
+                ) {
 
                     launchIntent.flags =
                         Intent.FLAG_ACTIVITY_NEW_TASK
 
                     try {
-
                         startActivity(
                             launchIntent
                         )
-
                     } catch (_: Exception) {
                     }
 
@@ -464,7 +1213,7 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
         }
 
         speak(
-            "Nem találom ezt az alkalmazást."
+            "Ezt az alkalmazást nem találom a telefonon."
         )
     }
 
