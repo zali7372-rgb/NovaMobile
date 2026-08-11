@@ -48,56 +48,42 @@ class NovaService : Service() {
         recognizer?.setRecognitionListener(
             object : RecognitionListener {
 
-                override fun onReadyForSpeech(
-                    params: Bundle?
-                ) {
+                override fun onReadyForSpeech(params: Bundle?) {
                 }
 
                 override fun onBeginningOfSpeech() {
                 }
 
-                override fun onRmsChanged(
-                    rmsdB: Float
-                ) {
+                override fun onRmsChanged(rmsdB: Float) {
                 }
 
-                override fun onBufferReceived(
-                    buffer: ByteArray?
-                ) {
+                override fun onBufferReceived(buffer: ByteArray?) {
                 }
 
                 override fun onEndOfSpeech() {
                 }
 
-                override fun onError(
-                    error: Int
-                ) {
+                override fun onError(error: Int) {
                     startListening()
                 }
 
-                override fun onResults(
-                    results: Bundle?
-                ) {
+                override fun onResults(results: Bundle?) {
 
-                    val matches =
-                        results?.getStringArrayList(
-                            SpeechRecognizer.RESULTS_RECOGNITION
-                        )
+                    val matches = results?.getStringArrayList(
+                        SpeechRecognizer.RESULTS_RECOGNITION
+                    )
 
-                    val text =
-                        matches
-                            ?.firstOrNull()
-                            ?.lowercase(Locale.getDefault())
-                            ?: ""
+                    val text = matches
+                        ?.firstOrNull()
+                        ?.lowercase(Locale.getDefault())
+                        ?: ""
 
                     handleCommand(text)
 
                     startListening()
                 }
 
-                override fun onPartialResults(
-                    partialResults: Bundle?
-                ) {
+                override fun onPartialResults(partialResults: Bundle?) {
                 }
 
                 override fun onEvent(
@@ -165,12 +151,11 @@ class NovaService : Service() {
             text.contains("idozito")
         ) {
 
-            val minutes =
-                Regex("""(\d+)""")
-                    .find(text)
-                    ?.groupValues
-                    ?.getOrNull(1)
-                    ?.toLongOrNull()
+            val minutes = Regex("""(\d+)""")
+                .find(text)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toLongOrNull()
 
             if (minutes != null) {
 
@@ -188,8 +173,7 @@ class NovaService : Service() {
                         false
                     )
 
-                    flags =
-                        Intent.FLAG_ACTIVITY_NEW_TASK
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
 
                 startActivity(intent)
@@ -206,14 +190,13 @@ class NovaService : Service() {
             text.contains("kereses")
         ) {
 
-            val query =
-                text
-                    .replace("nova", "")
-                    .replace("noa", "")
-                    .replace("keress rá", "")
-                    .replace("keress ra", "")
-                    .replace("keress", "")
-                    .trim()
+            val query = text
+                .replace("nova", "")
+                .replace("noa", "")
+                .replace("keress rá", "")
+                .replace("keress ra", "")
+                .replace("keress", "")
+                .trim()
 
             if (query.isNotBlank()) {
 
@@ -228,8 +211,7 @@ class NovaService : Service() {
                     Intent.ACTION_VIEW,
                     android.net.Uri.parse(url)
                 ).apply {
-                    flags =
-                        Intent.FLAG_ACTIVITY_NEW_TASK
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
 
                 startActivity(intent)
@@ -246,17 +228,16 @@ class NovaService : Service() {
             text.contains("inditsd")
         ) {
 
-            val appName =
-                text
-                    .replace("nova", "")
-                    .replace("noa", "")
-                    .replace("nyisd meg", "")
-                    .replace("nyisd", "")
-                    .replace("indítsd el", "")
-                    .replace("inditsd el", "")
-                    .replace("indítsd", "")
-                    .replace("inditsd", "")
-                    .trim()
+            val appName = text
+                .replace("nova", "")
+                .replace("noa", "")
+                .replace("nyisd meg", "")
+                .replace("nyisd", "")
+                .replace("indítsd el", "")
+                .replace("inditsd el", "")
+                .replace("indítsd", "")
+                .replace("inditsd", "")
+                .trim()
 
             openApplication(appName)
 
@@ -266,15 +247,13 @@ class NovaService : Service() {
 
     private fun openApplication(name: String) {
 
-        val apps =
-            packageManager.getInstalledApplications(0)
+        val apps = packageManager.getInstalledApplications(0)
 
         for (app in apps) {
 
-            val label =
-                packageManager
-                    .getApplicationLabel(app)
-                    .toString()
+            val label = packageManager
+                .getApplicationLabel(app)
+                .toString()
 
             if (
                 label.equals(
@@ -288,10 +267,9 @@ class NovaService : Service() {
             ) {
 
                 val launchIntent =
-                    packageManager
-                        .getLaunchIntentForPackage(
-                            app.packageName
-                        )
+                    packageManager.getLaunchIntentForPackage(
+                        app.packageName
+                    )
 
                 if (launchIntent != null) {
 
@@ -314,10 +292,9 @@ class NovaService : Service() {
             NotificationManager.IMPORTANCE_LOW
         )
 
-        val manager =
-            getSystemService(
-                NotificationManager::class.java
-            )
+        val manager = getSystemService(
+            NotificationManager::class.java
+        )
 
         manager.createNotificationChannel(channel)
     }
@@ -330,9 +307,7 @@ class NovaService : Service() {
         super.onDestroy()
     }
 
-    override fun onBind(
-        intent: Intent?
-    ): IBinder? {
+    override fun onBind(intent: Intent?): IBinder? {
         return null
     }
 }
