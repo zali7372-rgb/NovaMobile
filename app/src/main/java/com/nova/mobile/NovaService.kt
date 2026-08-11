@@ -231,12 +231,40 @@ class NovaService : Service(), TextToSpeech.OnInitListener {
             originalText
         )
 
-        if (
-            !text.contains("nova") &&
-            !text.contains("noa")
-        ) {
-            return
-        }
+       val novaNames = listOf(
+    "nova",
+    "noa",
+    "novaa",
+    "novi",
+    "novus",
+    "novacska",
+    "nova ai",
+    "hey nova",
+    "hey noa",
+    "he nova",
+    "he noa",
+    "szia nova",
+    "szia noa",
+    "hallod nova",
+    "hallod noa",
+    "figyelj nova",
+    "figyelj noa",
+    "nova figyelj",
+    "noa figyelj",
+    "nova legyszi",
+    "nova legy szives",
+    "noa legyszi",
+    "noa legy szives"
+)
+
+val novaTriggered =
+    novaNames.any { name ->
+        text.contains(name)
+    }
+
+if (!novaTriggered) {
+    return
+}
 
         val command = text
             .replace("nova", "")
